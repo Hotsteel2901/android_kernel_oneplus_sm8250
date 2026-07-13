@@ -3,13 +3,11 @@ name: Build KSU-Next + SUSFS kernel
 # Builds the OnePlus 8 (sm8250 / kona) kernel with KernelSU-Next (manual-hook
 # mode) and SUSFS 2.1.0, then packages an AnyKernel3 flashable zip.
 #
-# The stock OnePlus kernel tree uses symlinks with paths like
-# `../../../vendor/oplus/kernel/...` that are designed for the AOSP manifest
-# layout where the kernel source lives at <root>/kernel/msm-4.19/ and the
-# vendor modules at <root>/vendor/. We replicate that layout by symlinking
-# the checked-out repo into /tmp/aosp/kernel/msm-4.19 and placing the vendor
-# sources from OnePlusOSS/android_kernel_modules_and_devicetree_oneplus_sm8250
-# at /tmp/aosp/vendor/. All 86 dangling symlinks then resolve to real files.
+# The kernel tree symlinks use relative paths like `../../../vendor/oplus/...`
+# that all resolve to TWO LEVELS ABOVE the repo root. In the AOSP manifest the
+# kernel source sits at <root>/kernel/msm-4.19/ so two-levels-up is <root>/.
+# We replicate this by placing vendor/ (from OnePlusOSS modules repo) at
+# $GITHUB_WORKSPACE/../../vendor/ so every symlink resolves to a real file.
 
 on:
   push:
@@ -26,9 +24,6 @@ on:
       - 'drivers/Makefile'
       - 'fs/Makefile'
   workflow_dispatch:
-
-env:
-  AOSP_ROOT: /tmp/aosp
 
 jobs:
   build:
@@ -47,28 +42,28 @@ jobs:
             llvm clang-12 lld-12 llvm-12 \
             gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
 
-      - name: Set up AOSP-like directory layout & fetch vendor modules
+      - name: Fetch OPLUS vendor modules & place at correct relative path
         run: |
           set -e
-          # The symlinks in this kernel tree expect:
-          #   <root>/kernel/msm-4.19/   <- kernel source (this repo)
-          #   <root>/vendor/            <- OPLUS + QCOM vendor modules
-          mkdir -p "$AOSP_ROOT/kernel"
-          ln -s "$GITHUB_WORKSPACE" "$AOSP_ROOT/kernel/msm-4.19"
-          # Fetch the official OnePlus open-source vendor modules + devicetree.
+          # All symlinks resolve to <repo_root>/../../vendor/...
+          # (two levels above the repo, matching the AOSP manifest layout
+          #  where kernel source is at <root>/kernel/msm-4.19/).
+          VENDOR_DIR="$(cd "$GITHUB_WORKSPACE/../.." && pwd)/vendor"
+          echo "Placing vendor modules at: $VENDOR_DIR"
           git clone --depth=1 -b oneplus/sm8250_t_13.1_op8 \
             https://github.com/OnePlusOSS/android_kernel_modules_and_devicetree_oneplus_sm8250.git \
             /tmp/vendor-modules
-          cp -a /tmp/vendor-modules/vendor "$AOSP_ROOT/vendor"
+          rm -rf "$VENDOR_DIR"
+          cp -a /tmp/vendor-modules/vendor "$VENDOR_DIR"
           echo "=== verify: dangling symlinks remaining ==="
-          if find "$AOSP_ROOT/kernel/msm-4.19" -xtype l -not -path '*/.git/*' | grep -q .; then
-            echo "WARNING: still have dangling symlinks:"
-            find "$AOSP_ROOT/kernel/msm-4.19" -xtype l -not -path '*/.git/*'
+          if find . -xtype l -not -path './.git/*' | grep -q .; then
+            echo "WARNING: dangling symlinks:"
+            find . -xtype l -not -path './.git/*' | head -10
           else
             echo "none — all symlinks resolved"
           fi
           echo "=== verify: sched_assist/Kconfig ==="
-          head -3 "$AOSP_ROOT/kernel/msm-4.19/kernel/sched_assist/Kconfig" || echo "MISSING"
+          head -3 kernel/sched_assist/Kconfig || echo "MISSING"
 
       - name: Make gcc-wrapper.py Python3-compatible
         run: |
@@ -79,26 +74,23 @@ jobs:
           fi
 
       - name: Configure kernel
-        working-directory: /tmp/aosp/kernel/msm-4.19
         run: |
           make O=out ARCH=arm64 kona-perf_defconfig
 
       - name: Build kernel
-        working-directory: /tmp/aosp/kernel/msm-4.19
         run: |
           make O=out ARCH=arm64 \
             CC=clang-12 \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             HOSTCC=clang-12 \
-            -j"$(nproc)" 2>&1 | tee "$GITHUB_WORKSPACE/build.log" | tail -500
+            -j"$(nproc)" 2>&1 | tee build.log | tail -500
 
       - name: Package AnyKernel3 zip
         run: |
-          IMG_DIR="$AOSP_ROOT/kernel/msm-4.19/out/arch/arm64/boot"
-          if   [ -f "$IMG_DIR/Image.gz-dtb" ]; then cp "$IMG_DIR/Image.gz-dtb" Dists_ak3/
-          elif [ -f "$IMG_DIR/Image.gz" ];     then cp "$IMG_DIR/Image.gz"     Dists_ak3/
-          elif [ -f "$IMG_DIR/Image" ];       then cp "$IMG_DIR/Image"        Dists_ak3/
+          if   [ -f out/arch/arm64/boot/Image.gz-dtb ]; then cp out/arch/arm64/boot/Image.gz-dtb Dists_ak3/
+          elif [ -f out/arch/arm64/boot/Image.gz ];     then cp out/arch/arm64/boot/Image.gz     Dists_ak3/
+          elif [ -f out/arch/arm64/boot/Image ];       then cp out/arch/arm64/boot/Image        Dists_ak3/
           else echo "No kernel image found"; exit 1; fi
           cd Dists_ak3 && ./build_zip.sh
 
