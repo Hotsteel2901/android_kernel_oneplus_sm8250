@@ -123,11 +123,16 @@ jobs:
           # Build only Image.gz, NOT the default target (which builds ALL
           # DTBs including IoT boards like rb5 whose DTS includes are
           # missing) and NOT Image.gz-dtb (which also depends on dtbs).
+          #
+          # KCFLAGS suppresses clang-12 -Werror failures in OPLUS vendor
+          # modules that were written for older GCC/clang and use old-style
+          # function definitions (e.g. foo() instead of foo(void)).
           make O=out ARCH=arm64 \
             CC=clang-12 \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             HOSTCC=clang-12 \
+            KCFLAGS="-Wno-error=strict-prototypes -Wno-error=unused-function -Wno-error=unused-variable" \
             -j"$(nproc)" \
             Image.gz 2>&1 | tee build.log | tail -500
 
