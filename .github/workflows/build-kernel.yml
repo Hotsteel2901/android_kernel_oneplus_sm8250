@@ -3,12 +3,12 @@ name: Build KSU-Next + SUSFS kernel
 # Builds the OnePlus 8 (sm8250 / kona) kernel with KernelSU-Next (manual-hook
 # mode) and SUSFS 2.1.0, then packages an AnyKernel3 flashable zip.
 #
-# The stock OnePlus kernel tree references proprietary OPLUS vendor modules via
-# dangling symlinks (vendor/oplus/kernel/*, vendor/qcom/proprietary/*, ...).
-# To keep the build fully open-source we fetch the same files from the
-# LineageOS android_kernel_oneplus_sm8250 lineage-23.2 branch, which inlines
-# those modules as real files, and use them to fill every dangling symlink in
-# this tree before compiling.
+# The stock OnePlus kernel tree references OPLUS vendor modules via dangling
+# symlinks (vendor/oplus/kernel/*, vendor/qcom/proprietary/*, ...). We resolve
+# them by fetching the official OnePlus open-source modules + devicetree repo
+# (OnePlusOSS/android_kernel_modules_and_devicetree_oneplus_sm8250) on the
+# matching oneplus/sm8250_t_13.1_op8 branch and placing its vendor/ directory
+# at the kernel tree root. All 86 dangling symlinks then resolve to real files.
 
 on:
   push:
@@ -39,47 +39,32 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential bc bison flex libssl-dev libncurses-dev \
-            libelf-dev cpio zip unzip rsync python3 python3-distutils \
-            2to3 llvm clang-12 lld-12 llvm-12 \
+            libelf-dev cpio zip unzip rsync python3 \
+            llvm clang-12 lld-12 llvm-12 \
             gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
 
-      - name: Fill OPLUS vendor sources from LineageOS (open-source replacement)
+      - name: Fetch OnePlus open-source vendor modules & devicetree
         run: |
           set -e
-          git clone --depth=1 -b lineage-23.2 \
-            https://github.com/LineageOS/android_kernel_oneplus_sm8250.git /tmp/lineage
-          missing=0
-          # Replace every dangling symlink in this tree with the matching real
-          # file/dir from the LineageOS tree (which inlines the OPLUS modules).
-          find . -xtype l | sort | while IFS= read -r link; do
-            rel="${link#./}"
-            src="/tmp/lineage/$rel"
-            if [ -e "$src" ] || [ -L "$src" ]; then
-              rm -f "$link"
-              if [ -d "$src" ]; then
-                mkdir -p "$link"
-                cp -a "$src/." "$link/"
-              else
-                cp -a "$src" "$link"
-              fi
-              echo "[ok]   $rel"
-            else
-              echo "[MISS] $rel"
-              missing=1
-            fi
-          done
-          echo "=== remaining dangling symlinks ==="
-          if find . -xtype l | grep -q .; then
-            find . -xtype l
+          # The matching branch mirrors this kernel branch exactly.
+          git clone --depth=1 -b oneplus/sm8250_t_13.1_op8 \
+            https://github.com/OnePlusOSS/android_kernel_modules_and_devicetree_oneplus_sm8250.git \
+            /tmp/vendor-modules
+          # Place vendor/ at the kernel tree root so all 86 dangling symlinks resolve.
+          cp -a /tmp/vendor-modules/vendor ./vendor
+          echo "=== verify: dangling symlinks remaining ==="
+          if find . -xtype l -not -path './.git/*' | grep -q .; then
+            echo "WARNING: still have dangling symlinks:"
+            find . -xtype l -not -path './.git/*'
           else
-            echo "none"
+            echo "none — all symlinks resolved"
           fi
 
       - name: Make gcc-wrapper.py Python3-compatible
         run: |
           if [ -f scripts/gcc-wrapper.py ]; then
-            2to3 -w --nobackups scripts/gcc-wrapper.py || true
-            # ensure shebang is python3
+            # Convert Python2 print statements to Python3
+            sed -i 's/^\(\s*\)print \(.*\)$/\1print(\2)/' scripts/gcc-wrapper.py
             sed -i '1s|^#!.*python.*|#!/usr/bin/env python3|' scripts/gcc-wrapper.py
             chmod +x scripts/gcc-wrapper.py
           fi
@@ -93,8 +78,9 @@ jobs:
           make O=out ARCH=arm64 \
             CC=clang-12 \
             CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             HOSTCC=clang-12 \
-            -j"$(nproc)" 2>&1 | tee build.log | tail -400
+            -j"$(nproc)" 2>&1 | tee build.log | tail -500
 
       - name: Package AnyKernel3 zip
         run: |
@@ -118,5 +104,4 @@ jobs:
           name: build-log
           path: |
             build.log
-            out/**/*.cmd
           if-no-files-found: warn
