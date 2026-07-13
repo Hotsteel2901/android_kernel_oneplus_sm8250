@@ -73,6 +73,19 @@ jobs:
             chmod +x scripts/gcc-wrapper.py
           fi
 
+      - name: Expose vendor defconfigs at arch/arm64/configs/
+        # kona-perf_defconfig lives in arch/arm64/configs/vendor/ but `make
+        # kona-perf_defconfig` only looks in arch/arm64/configs/.  Symlink the
+        # vendor defconfigs up one level so the standard defconfig target finds
+        # them, mirroring what the OnePlus build script does internally.
+        run: |
+          cd arch/arm64/configs
+          for f in vendor/kona*_defconfig; do
+            [ -f "$f" ] || continue
+            ln -sf "$f" "$(basename "$f")"
+          done
+          ls -la kona*
+
       - name: Configure kernel
         run: |
           make O=out ARCH=arm64 kona-perf_defconfig
