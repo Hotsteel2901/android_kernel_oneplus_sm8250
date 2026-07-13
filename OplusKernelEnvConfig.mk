@@ -17,6 +17,15 @@
 
 -include oplus_native_features.mk
 
+# Export all OPLUS_FEATURE_* Make variables so they are visible to kbuild
+# sub-makes when descending into subdirectories (drivers/scsi/ufs/Makefile,
+# net/Makefile, etc. use ifneq ($(OPLUS_FEATURE_xxx),) for conditional
+# compilation).  Without this export, the variables are only available in the
+# top-level Makefile invocation and NOT in the sub-makes that kbuild spawns
+# for each subdirectory, causing conditionally-compiled files (ufsfeature.o,
+# ufs_latency_hist.o, oplus_router_boost/, etc.) to be silently skipped.
+export
+
 ###ifdef OPLUS_ARCH_INJECT
 OPLUS_CONNECTIVITY_NATIVE_FEATURE_SET :=
 
