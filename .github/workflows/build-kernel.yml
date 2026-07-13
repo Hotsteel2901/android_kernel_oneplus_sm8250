@@ -56,18 +56,22 @@ jobs:
             https://github.com/OnePlusOSS/android_kernel_modules_and_devicetree_oneplus_sm8250.git \
             /tmp/vendor-modules
           rm -rf "$VENDOR_DIR"
+          # The vendor modules repo has TWO top-level dirs:
+          #   vendor/  -> oplus/, qcom/  (OPLUS + Qualcomm vendor modules)
+          #   kernel/  -> msm-4.19/techpack/{display,camera,video}/ (display/camera/video drivers)
+          # Copy vendor/ to $VENDOR_DIR (where symlinks expect it).
           cp -a /tmp/vendor-modules/vendor "$VENDOR_DIR"
-          # The vendor repo ships real directories at
-          # vendor/kernel/msm-4.19/techpack/{display,camera,video}/ which
-          # conflict with our symlink vendor/kernel/msm-4.19 -> $GITHUB_WORKSPACE
-          # (ln -sf silently fails on a non-empty directory).  Move the techpack
-          # content aside so the symlink can be created, and so we can point the
-          # kernel source tree's techpack/ at them.
-          if [ -d "$VENDOR_DIR/kernel/msm-4.19/techpack" ]; then
+          # Copy the techpack dirs to $VENDOR_DIR/techpack-vendor/ so we can
+          # symlink them into the kernel source tree's techpack/ later.  We
+          # can't put them under $VENDOR_DIR/kernel/msm-4.19/ because that
+          # path needs to be a symlink to $GITHUB_WORKSPACE for vendor module
+          # #include "../../../../kernel/msm-4.19/drivers/..." resolution.
+          if [ -d /tmp/vendor-modules/kernel/msm-4.19/techpack ]; then
             mkdir -p "$VENDOR_DIR/techpack-vendor"
-            cp -a "$VENDOR_DIR/kernel/msm-4.19/techpack/." "$VENDOR_DIR/techpack-vendor/"
-            rm -rf "$VENDOR_DIR/kernel"
+            cp -a /tmp/vendor-modules/kernel/msm-4.19/techpack/." "$VENDOR_DIR/techpack-vendor/"
           fi
+          echo "=== verify: techpack-vendor contents ==="
+          ls "$VENDOR_DIR/techpack-vendor/" || echo "MISSING"
           echo "=== verify: dangling symlinks remaining ==="
           if find . -xtype l -not -path './.git/*' | grep -q .; then
             echo "WARNING: dangling symlinks:"
@@ -131,12 +135,12 @@ jobs:
           done
           echo "=== verify symlinks ==="
           ls -la kernel/msm-4.19 drivers/kernel/msm-4.19 \
-                 "$VENDOR_DIR/kernel/msm-4.19" "$VENDOR_DIR/oplus/kernel/msm-4.19"
-          ls -la techpack/display techpack/camera techpack/video 2>/dev/null
+                 "$VENDOR_DIR/kernel/msm-4.19" "$VENDOR_DIR/oplus/kernel/msm-4.19" || true
+          ls -la techpack/display techpack/camera techpack/video 2>/dev/null || true
           echo "=== verify storm-watch.h resolves via vendor path ==="
-          ls -L "$VENDOR_DIR/kernel/msm-4.19/drivers/power/supply/qcom/storm-watch.h" && echo "OK"
+          ls -L "$VENDOR_DIR/kernel/msm-4.19/drivers/power/supply/qcom/storm-watch.h" && echo "OK" || echo "FAIL: storm-watch.h"
           echo "=== verify dsi_display.h resolves via techpack ==="
-          ls -L "techpack/display/msm/dsi/dsi_display.h" && echo "OK"
+          ls -L "techpack/display/msm/dsi/dsi_display.h" && echo "OK" || echo "FAIL: dsi_display.h"
 
       - name: Configure kernel
         run: |
