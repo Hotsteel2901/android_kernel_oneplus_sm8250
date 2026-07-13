@@ -68,7 +68,7 @@ jobs:
           # #include "../../../../kernel/msm-4.19/drivers/..." resolution.
           if [ -d /tmp/vendor-modules/kernel/msm-4.19/techpack ]; then
             mkdir -p "$VENDOR_DIR/techpack-vendor"
-            cp -a /tmp/vendor-modules/kernel/msm-4.19/techpack/." "$VENDOR_DIR/techpack-vendor/"
+            cp -a /tmp/vendor-modules/kernel/msm-4.19/techpack/. "$VENDOR_DIR/techpack-vendor/"
           fi
           echo "=== verify: techpack-vendor contents ==="
           ls "$VENDOR_DIR/techpack-vendor/" || echo "MISSING"
