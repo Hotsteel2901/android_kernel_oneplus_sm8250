@@ -16,6 +16,8 @@ on:
       - '.github/workflows/build-kernel.yml'
       - 'fs/susfs.c'
       - 'fs/read_write.c'
+      - 'fs/notify/fdinfo.c'
+      - 'fs/notify/inotify/inotify.h'
       - 'KernelSU-Next/**'
       - 'drivers/kernelsu'
       - 'Dists_ak3/**'
