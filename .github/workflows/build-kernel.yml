@@ -1,0 +1,122 @@
+name: Build KSU-Next + SUSFS kernel
+
+# Builds the OnePlus 8 (sm8250 / kona) kernel with KernelSU-Next (manual-hook
+# mode) and SUSFS 2.1.0, then packages an AnyKernel3 flashable zip.
+#
+# The stock OnePlus kernel tree references proprietary OPLUS vendor modules via
+# dangling symlinks (vendor/oplus/kernel/*, vendor/qcom/proprietary/*, ...).
+# To keep the build fully open-source we fetch the same files from the
+# LineageOS android_kernel_oneplus_sm8250 lineage-23.2 branch, which inlines
+# those modules as real files, and use them to fill every dangling symlink in
+# this tree before compiling.
+
+on:
+  push:
+    branches: [ oneplus/sm8250_t_13.1_op8 ]
+    paths:
+      - '.github/workflows/build-kernel.yml'
+      - 'fs/susfs.c'
+      - 'fs/read_write.c'
+      - 'KernelSU-Next/**'
+      - 'drivers/kernelsu'
+      - 'Dists_ak3/**'
+      - 'arch/arm64/configs/vendor/kona*'
+      - 'drivers/Kconfig'
+      - 'drivers/Makefile'
+      - 'fs/Makefile'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential bc bison flex libssl-dev libncurses-dev \
+            libelf-dev cpio zip unzip rsync python3 python3-distutils \
+            2to3 llvm clang-12 lld-12 llvm-12 \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+
+      - name: Fill OPLUS vendor sources from LineageOS (open-source replacement)
+        run: |
+          set -e
+          git clone --depth=1 -b lineage-23.2 \
+            https://github.com/LineageOS/android_kernel_oneplus_sm8250.git /tmp/lineage
+          missing=0
+          # Replace every dangling symlink in this tree with the matching real
+          # file/dir from the LineageOS tree (which inlines the OPLUS modules).
+          find . -xtype l | sort | while IFS= read -r link; do
+            rel="${link#./}"
+            src="/tmp/lineage/$rel"
+            if [ -e "$src" ] || [ -L "$src" ]; then
+              rm -f "$link"
+              if [ -d "$src" ]; then
+                mkdir -p "$link"
+                cp -a "$src/." "$link/"
+              else
+                cp -a "$src" "$link"
+              fi
+              echo "[ok]   $rel"
+            else
+              echo "[MISS] $rel"
+              missing=1
+            fi
+          done
+          echo "=== remaining dangling symlinks ==="
+          if find . -xtype l | grep -q .; then
+            find . -xtype l
+          else
+            echo "none"
+          fi
+
+      - name: Make gcc-wrapper.py Python3-compatible
+        run: |
+          if [ -f scripts/gcc-wrapper.py ]; then
+            2to3 -w --nobackups scripts/gcc-wrapper.py || true
+            # ensure shebang is python3
+            sed -i '1s|^#!.*python.*|#!/usr/bin/env python3|' scripts/gcc-wrapper.py
+            chmod +x scripts/gcc-wrapper.py
+          fi
+
+      - name: Configure kernel
+        run: |
+          make O=out ARCH=arm64 kona-perf_defconfig
+
+      - name: Build kernel
+        run: |
+          make O=out ARCH=arm64 \
+            CC=clang-12 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            HOSTCC=clang-12 \
+            -j"$(nproc)" 2>&1 | tee build.log | tail -400
+
+      - name: Package AnyKernel3 zip
+        run: |
+          if   [ -f out/arch/arm64/boot/Image.gz-dtb ]; then cp out/arch/arm64/boot/Image.gz-dtb Dists_ak3/
+          elif [ -f out/arch/arm64/boot/Image.gz ];     then cp out/arch/arm64/boot/Image.gz     Dists_ak3/
+          elif [ -f out/arch/arm64/boot/Image ];       then cp out/arch/arm64/boot/Image        Dists_ak3/
+          else echo "No kernel image found"; exit 1; fi
+          cd Dists_ak3 && ./build_zip.sh
+
+      - name: Upload flashable zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: ksu-susfs-kona-op8
+          path: Dists_ak3/*.zip
+          if-no-files-found: error
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: |
+            build.log
+            out/**/*.cmd
+          if-no-files-found: warn
