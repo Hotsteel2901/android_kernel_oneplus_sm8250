@@ -141,6 +141,7 @@ out_kfree:
 			kfree(pathname);
 		}
 orig_flow:
+		;
 #endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 		/*
 		 * IN_ALL_EVENTS represents all of the mask bits
